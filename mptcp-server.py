@@ -1,7 +1,10 @@
 # Copyright (C) 2010 WIDE Project.  All rights reserved.
+# Copyright (C) 2016 University of Glasgow. All rights reserved.
 #
 # Yoshifumi Nishida  <nishida@sfc.wide.ad.jp>
 # Michio Honda  <micchie@sfc.wide.ad.jp>
+# Stephen McQuistin <sm@smcquistin.uk>
+#   [August 2016] Add support for HTTP-wrapped header and dup-ack requests.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -221,25 +224,36 @@ def send_packet():
 
    # special hack parse
    sdata = ""
+   http = 0
+   abbrev_header = ""
+   http_response = ""
    if len(data) > 3: 
-       if struct.unpack('!B', data[0:1])[0] == request_hdrdata:
-           # Prepare receiving headers
-           sdata = rcvhdrdata
-           # Prepare sending headers (IP and TCP checksums are zero)
-	   tmpiph = tcplib.iphdr(ipsrc, ipdest, tcplib.BASEHDRLEN + 512, \
-			   ipid, ipttl)
-	   tmptcph = tcplib.tcphdr(tcpsport, tcpdport, tcpseqno, tcpackno, \
-			   tcpflag, tcpwindow, tcpsoption)
-	   sdata += tmpiph.bin() + tmptcph.bin() 
-           target_len = 512 - len(tcpsoption)
-	   cur_len = len(sdata)
-	   if len(data) >= target_len - cur_len:
-	       sdata += data[0: target_len - cur_len]
-	   else:
-	       sdata += data
-	       cur_len += len(data)
-	       for i in range(0, target_len - cur_len):
-		   sdata += struct.pack('!B', 0xAB)
+        unpacked = struct.unpack(str(len(data)) + 's', data)[0]
+        if unpacked[0:3] == "GET":
+            http = 1
+            end_of_request_line = unpacked.find("\r\n")
+            abbrev_header = "GET /%s HTTP/1.1%s" % (unpacked[6], unpacked[end_of_request_line:])
+        if (struct.unpack('!B', data[0:1])[0] == request_hdrdata) or (struct.unpack('!B', struct.unpack(str(len(data)) + 's', data)[0][6])[0] == request_hdrdata):
+            # Prepare receiving headers
+            sdata = rcvhdrdata
+            # Prepare sending headers (IP and TCP checksums are zero)
+            tmpiph = tcplib.iphdr(ipsrc, ipdest, tcplib.BASEHDRLEN + 512, \
+                  ipid, ipttl)
+            tmptcph = tcplib.tcphdr(tcpsport, tcpdport, tcpseqno, tcpackno, \
+			            tcpflag, tcpwindow, tcpsoption)
+            sdata += tmpiph.bin() + tmptcph.bin() 
+            target_len = 512 - len(tcpsoption)
+            cur_len = len(sdata)
+            if http == 1:
+                sdata += struct.pack(str(len(abbrev_header)) + 's', abbrev_header)
+                cur_len += len(abbrev_header)
+            if len(data) >= target_len - cur_len:
+                sdata += data[6: target_len - cur_len + 6]
+            else:
+                sdata += data[6:]
+                cur_len += len(data)-6
+                for i in range(0, target_len - cur_len):
+                    sdata += struct.pack('!B', 0xAB)
 
    # prepare ip header
    iplen = tcplib.BASEHDRLEN + len(tcpsoption) + len(sdata)
@@ -255,7 +269,15 @@ def send_packet():
 
    payload = iphs.bin()
    payload += tcphs.bin()
-   if len(sdata) > 0: 
+   if http == 1:
+       if (len(sdata) > 0):
+           http_response = "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % (len(sdata)-40)
+           payload += struct.pack(str(len(http_response)) + 's', http_response)
+           payload += sdata[:-(len(http_response))]
+       else:
+           http_response = "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % 0
+           payload += struct.pack(str(len(http_response)) + 's', http_response)
+   elif len(sdata) > 0: 
        payload += sdata
 
    dstr = socket.inet_ntoa(struct.pack('!L',ipdest))
@@ -520,6 +542,8 @@ while True:
 	# special hack parse
         if datalen > 3:
             dhead = struct.unpack('!B', data[0:1])[0]
+            if struct.unpack(str(len(data)) + 's', data)[0][0:3] == "GET":
+              dhead = (struct.unpack('!B', struct.unpack(str(len(data)) + 's', data)[0][6])[0])
 	    if dhead == request_dupack: 
 	        tcpackno = tcph.seqno
         send_packet()

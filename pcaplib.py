@@ -1,7 +1,10 @@
 # Copyright (C) 2010 WIDE Project.  All rights reserved.
+# Copyright (C) 2016 University of Glasgow. All rights reserved.
 #
 # Michio Honda  <micchie@sfc.wide.ad.jp>
-#
+# Stephen McQuistin <sm@smcquistin.uk>
+#	[August 2016] Added full path for libpcap.dylib on OS X
+#  
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
 # are met:
@@ -194,7 +197,7 @@ class pcaplib:
 
 	if self.ostype == 'Darwin':
 	    try:
-	        self.lib = CDLL("libpcap.dylib")
+	        self.lib = CDLL("/usr/lib/libpcap.dylib")
 	    except OSError:
 		self.lib = None
 	elif self.ostype == 'FreeBSD':

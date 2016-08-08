@@ -1,7 +1,10 @@
 # Copyright (C) 2010 WIDE Project.  All rights reserved.
+# Copyright (C) 2016 University of Glasgow. All rights reserved.
 #
 # Michio Honda  <micchie@sfc.wide.ad.jp>
-#
+# Stephen McQuistin <sm@smcquistin.uk>
+#	[August 2016] Add HTTP-wrapped tests to support HTTP proxies
+#  
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
 # are met:
@@ -79,7 +82,17 @@ TestEntries = {'Syn':-1, 'SynOpt':-1, 'SynOpt2':-1, \
 	'ChangeIncomingSeq':-1, 'ChangeIncomingSeq4Opt':-1, \
 	'ChangeAwnd':-1, 'ChangeAwnd4KnownOpt':-1, 'ChangeAwnd4Opt':-1, \
 	'ChangeSeq':-1, 'ChangeSeq4KnownOpt':-1, 'ChangeSeq4Opt':-1, \
-	'IndAck':-1, 'IndAck4KnownOpt':-1, 'IndAck4Opt':-1}
+	'IndAck':-1, 'IndAck4KnownOpt':-1, 'IndAck4Opt':-1, \
+	'DataHttp':-1, 'IndAckHttp':-1, 'ChangeSeqHttp':-1, \
+    'ChangeAwndHttp':-1, 'ChangeIncomingSeqHttp':-1, 'IndAck4KnownOptHttp':-1, \
+    'ChangeSeq4KnownOptHttp':-1, 'ChangeAwnd4KnownOptHttp':-1, 'IndAck4OptHttp':-1, \
+    'ChangeSeq4OptHttp':-1, 'ChangeAwnd4OptHttp':-1, 'ChangeIncomingSeq4OptHttp':-1, \
+    'SplitHttp':-1, 'SplitKnownOptHttp':-1, 'SplitOptHttp':-1, \
+    'CoalesceFqHttp':-1, 'CoalesceHttp':-1, 'CoalesceFqKnownOptHttp':-1, \
+    'CoalesceKnownOptHttp':-1, 'CoalesceFqOptHttp':-1, 'CoalesceOptHttp':-1, \
+    'PseudoRtxHttp':-1, 'PseudoRtxLHttp':-1, 'PseudoRtxSHttp':-1, \
+    'AckHoleHttp':-1, 'SeqHoleHttp':-1, 'HttpResponseHeaderChange':-1, \
+    'HttpRequestChange':-1}
 
 #
 # Payload marking to request special behavior of the responder
@@ -131,8 +144,17 @@ def make_result_string(dictres):
     s += 'ChangeIncomingSeq %(ChangeIncomingSeq)d ChangeIncomingSeq4Opt %(ChangeIncomingSeq4Opt)d '%dictres
     s += 'ChangeAwnd %(ChangeAwnd)d ChangeAwnd4KnownOpt %(ChangeAwnd4KnownOpt)d ChangeAwnd4Opt %(ChangeAwnd4Opt)d '%dictres
     s += 'ChangeSeq %(ChangeSeq)d ChangeSeq4KnownOpt %(ChangeSeq4KnownOpt)d ChangeSeq4Opt %(ChangeSeq4Opt)d '%dictres
-    s += 'IndAck %(IndAck)d IndAck4KnownOpt %(IndAck4KnownOpt)d IndAck4Opt %(IndAck4Opt)d'%dictres
-
+    s += 'IndAck %(IndAck)d IndAck4KnownOpt %(IndAck4KnownOpt)d IndAck4Opt %(IndAck4Opt)d '%dictres
+    s += 'DataHttp %(DataHttp)d IndAckHttp %(IndAckHttp)d ChangeSeqHttp %(ChangeSeqHttp)d ' % dictres
+    s += 'ChangeAwndHttp %(ChangeAwndHttp)d ChangeIncomingSeqHttp %(ChangeIncomingSeqHttp)d IndAck4KnownOptHttp %(IndAck4KnownOptHttp)d ' % dictres
+    s += 'ChangeSeq4KnownOptHttp %(ChangeSeq4KnownOptHttp)d ChangeAwnd4KnownOptHttp %(ChangeAwnd4KnownOptHttp)d IndAck4OptHttp %(IndAck4OptHttp)d ' % dictres
+    s += 'ChangeSeq4OptHttp %(ChangeSeq4OptHttp)d ChangeAwnd4OptHttp %(ChangeAwnd4OptHttp)d ChangeIncomingSeq4OptHttp %(ChangeIncomingSeq4OptHttp)d ' % dictres
+    s += 'SplitHttp %(SplitHttp)d SplitKnownOptHttp %(SplitKnownOptHttp)d SplitOptHttp %(SplitOptHttp)d ' % dictres
+    s += 'CoalesceFqHttp %(CoalesceFqHttp)d CoalesceHttp %(CoalesceHttp)d CoalesceFqKnownOptHttp %(CoalesceFqKnownOptHttp)d ' % dictres
+    s += 'CoalesceKnownOptHttp %(CoalesceKnownOptHttp)d CoalesceFqOptHttp %(CoalesceFqOptHttp)d CoalesceOptHttp %(CoalesceOptHttp)d ' % dictres
+    s += 'PseudoRtxHttp %(PseudoRtxHttp)d PseudoRtxLHttp %(PseudoRtxLHttp)d PseudoRtxSHttp %(PseudoRtxSHttp)d ' % dictres
+    s += 'AckHoleHttp %(AckHoleHttp)d SeqHoleHttp %(SeqHoleHttp)d HttpResponseHeaderChange %(HttpResponseHeaderChange)d ' % dictres
+    s += 'HttpRequestChange %(HttpRequestChange)d' % dictres
     return s
 
 logfile = ""
@@ -220,12 +242,26 @@ def get_mprcv_nxt(ans, mpackseq):
 # obtain something from peer-received TCP header 
 # Returns tuple of my received header, peer received header, peer sent header,
 # rest of peer sent payload as padding
-def hdr_request_reply(ans):
+def hdr_request_reply(ans, http=0, result=None):
     for rcv in ans:
 	payload = rcv[3]
 	# This request MUST contain receiving IP/TCP and sending IP/TCP headers
 	if len(payload) < 80: 
 	    continue
+	if http == 1:
+		if struct.unpack(str(len(payload)) + 's', payload)[0][0:4] == "HTTP":
+			log2file("Info: HTTP response received as expected")
+			http_header = struct.unpack(str(len(payload)) + 's', payload)[0][:payload.find("\r\n\r\n")+4]
+			http_header_expected = "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % (len(payload)-payload.find("\r\n\r\n")-4)
+			if http_header != http_header_expected:
+				log2file("Info: HTTP response received:", http_header)
+				if result != None: result['HttpResponseHeaderChange'] = 1
+			elif result != None and result['HttpResponseHeaderChange'] == -1 and http_header == http_header_expected:
+				result['HttpResponseHeaderChange'] = 0
+			payload = payload[payload.find("\r\n\r\n")+4:]
+		else:
+			log2file("Info: HTTP response expected, not received")
+			http = 0
 	# Obtain IP/TCP headers the peer received
 	riph, rtcph, rtcpopts, shdrs = tcpsrlib.parse_headers(payload)
 	# Validation of payload contents
@@ -237,10 +273,18 @@ def hdr_request_reply(ans):
 	    continue
 
 	siph, stcph, stcpopts, padding = tcpsrlib.parse_headers(shdrs)
+	if http == 1:
+		http_request_sent_abbrv = "GET /%s HTTP/1.1\r\nHost: tcptest.smcquistin.uk\r\nConnection: close\r\n\r\n" % struct.pack('!B', Request_hdrdata)
+		if padding[:padding.find("\r\n\r\n")+4] != http_request_sent_abbrv:
+			log2file("Info: HTTP request sent:", http_request_sent_abbrv)
+			if result != None: result['HttpRequestChange'] = 1
+		elif result != None and result['HttpRequestChange'] == -1 and padding[:padding.find("\r\n\r\n")+4] == http_request_sent_abbrv:
+			result['HttpRequestChange'] = 0
+		padding = padding[padding.find("\r\n\r\n")+4:]
 	if siph.proto != socket.IPPROTO_TCP:
 	    log2file("Info: header request doesn't work, funny proto number\n")
 	    continue
-	elif struct.unpack('!B', padding[0:1])[0] != Request_hdrdata:
+	elif struct.unpack('!B', padding[6:7])[0] != Request_hdrdata:
 	    log2file("Info: header request doesn't work, funny content\n")
 	    continue
 	log2file('Info: Peer received %sInfo: Peer sent %s'%\
@@ -317,8 +361,8 @@ def get_data_result(ans, sentseq, sentsize):
 # return 1 if outgoing Timestamp option is removed
 # return 2 if outgoing Timestamp (ts_val) is zeroed
 # return 3 if outgoing Timestamp (ts_val) is changed
-def how_otimestamp_affected(ans, ots):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def how_otimestamp_affected(ans, ots, http=0):
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     for opt in rcvdhdr[2]:
@@ -336,8 +380,8 @@ def how_otimestamp_affected(ans, ots):
     return 1
 
 # MUST be used with Request_hdrdata
-def is_mpdata_removed(ans):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def is_mpdata_removed(ans, http=0):
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     for opt in rcvdhdr[2]:
@@ -346,8 +390,8 @@ def is_mpdata_removed(ans):
     return 1
 
 # MUST be used with Request_hdrdata
-def is_mpdata_zeroed(ans):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def is_mpdata_zeroed(ans, http=0):
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     for opt in rcvdhdr[2]:
@@ -359,8 +403,8 @@ def is_mpdata_zeroed(ans):
     return -1
 
 # MUST be used with Request_hdrdata
-def is_mpdata_changed(ans, sentdsn):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def is_mpdata_changed(ans, sentdsn, http=0):
+    rcvdhdr = hdr_request_reply(ans, http=http)[1]
     if rcvdhdr is None: 
 	return -1
     found = 0
@@ -384,7 +428,7 @@ def is_mpdata_changed(ans, sentdsn):
 # returns 7 if incoming TS_ecr is zeroed
 # returns 8 if outgoing Timestamp is changed, zeroed or removed but re-synced at incoming TS_ecr
 # returns 9 in the other case
-def get_data_known_opt_result(ans, sentts, sentseq, sentsize):
+def get_data_known_opt_result(ans, sentts, sentseq, sentsize, http=0):
     retval = get_data_result(ans, sentseq, sentsize)
     if retval == 1: return 1
     zero_ecr = invalid_ecr = valid_ecr = 0
@@ -409,7 +453,7 @@ def get_data_known_opt_result(ans, sentts, sentseq, sentsize):
     if zero_ecr == 0 and invalid_ecr == 0 and valid_ecr == 0:
 	log2file("Info: Timestamp is not replied\n")
 
-    otimestamp = how_otimestamp_affected(ans, sentts)
+    otimestamp = how_otimestamp_affected(ans, sentts, http=http)
     if otimestamp == -1:
         return -1
     if valid_ecr:
@@ -527,8 +571,8 @@ def is_ack_indirect(ans):
     log2file("Info: Got only direct Ack\n")
     return 0
 
-def is_incoming_seq_rewritten(ans):
-    rcv, rcvdhdr, senthdr, padding = hdr_request_reply(ans)
+def is_incoming_seq_rewritten(ans,http=0):
+    rcv, rcvdhdr, senthdr, padding = hdr_request_reply(ans,http=http)
     if senthdr == None:
         return -1
     if rcv[1].seqno != senthdr[1].seqno:
@@ -538,9 +582,9 @@ def is_incoming_seq_rewritten(ans):
     return -1
     
 # MUST be used for data with Request_hdrdata 
-def is_seq_rewritten(ans, myseq):
+def is_seq_rewritten(ans, myseq,http=0):
     rewritten = -1
-    rcvdhdr = hdr_request_reply(ans)[1]
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     if rcvdhdr[1].seqno == myseq: 
@@ -563,9 +607,9 @@ def is_awnd_unexpected(ans):
 	return 1
 
 # MUST be used for data with Request_hdrdata 
-def is_awnd_rewritten(ans, myawnd):
+def is_awnd_rewritten(ans, myawnd, http=0):
     rewritten = -1
-    rcvdhdr = hdr_request_reply(ans)[1]
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     if rcvdhdr[1].window == myawnd: 
@@ -577,8 +621,8 @@ def is_awnd_rewritten(ans, myawnd):
     return rewritten
 
 # MUST be used for data with Request_hdrdata 
-def are_segments_coalesced(ans, sent_len):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def are_segments_coalesced(ans, sent_len, http=0):
+    rcvdhdr = hdr_request_reply(ans, http=http)[1]
     if rcvdhdr is None:
 	return -1
     riph, rtcph, rtcpo = rcvdhdr
@@ -600,8 +644,8 @@ def are_segments_coalesced(ans, sent_len):
 # return 3 if non of options are copied to the coalesced segment
 # return 4 in the other cases
 # MUST be used for data with Request_hdrdata 
-def how_tcpopt_coalesced(ans, num_segs, optname):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def how_tcpopt_coalesced(ans, num_segs, optname, http=0):
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None:
 	log2file("Info: failed to obtain header request\n")
 	return -1
@@ -643,8 +687,8 @@ def how_tcpopt_coalesced(ans, num_segs, optname):
 
 # detect split segments based on the peer-received segment
 # MUST be used with Request_hdrdata
-def is_segment_split(ans, sent_len):
-    rcvdhdr = hdr_request_reply(ans)[1]
+def is_segment_split(ans, sent_len, http=0):
+    rcvdhdr = hdr_request_reply(ans,http=http)[1]
     if rcvdhdr is None: 
 	return -1
     riph, rtcph, rtcpo = rcvdhdr
@@ -714,7 +758,7 @@ def how_segment_split_from_ts(ans):
 # returns 5 if connection has been reset due to pseudo retransmission
 # returns 6 in the other cases
 # MUST be used for data with Request_hdrdata 
-def get_pseudo_rtx_result(ans, sentsize, sentseq, sentcontent):
+def get_pseudo_rtx_result(ans, sentsize, sentseq, sentcontent, http=0):
     highest_ack = tcpsrlib.get_highest_ack(ans)
     if highest_ack == 0: 
 	log2file("Info: Receiver didn't ack for pseudo rtx\n")
@@ -724,7 +768,7 @@ def get_pseudo_rtx_result(ans, sentsize, sentseq, sentcontent):
 	else:
 	    return 1
 
-    rcv, rcvdhdr, senthdr, rcvd_payload = hdr_request_reply(ans)
+    rcv, rcvdhdr, senthdr, rcvd_payload = hdr_request_reply(ans, http=http)
     if rcvdhdr is None:
 	if highest_ack > sentseq:
 	    log2file("Info: ack is advanced, but rtxed is not received\n")
@@ -846,7 +890,7 @@ def tcp_fin_close(daddr, dport, saddr, sport, seq, ackseq, awnd=Awnd, \
 
 def output_segments(daddr, dport, saddr, sport, startseq, ackseq, awnd, \
 		segments, ts=(0,0), startdsn=(0,0), data=(), fq=0,\
-		timeout=1.0, usepcap=0, ifname="", dmac=0, smac=0):
+		timeout=1.0, usepcap=0, ifname="", dmac=0, smac=0, http=0):
 
     # We assume DSN (0,0,0) is impossible except for SYN, so treat it as no DSN
     if startdsn == (0,0): dsnon = 0
@@ -865,8 +909,15 @@ def output_segments(daddr, dport, saddr, sport, startseq, ackseq, awnd, \
 	    contents = data[j]
 	else:
 	    contents = 0x99
-	for i in range(0, segments[j]):
-	    payload += struct.pack('!B', contents)
+	if (http == 1):
+		get_str = ""
+		for i in range(0, segments[j]-66):
+			get_str += struct.pack('!B', contents)
+		payload = "GET /%s HTTP/1.1\r\nHost: tcptest.smcquistin.uk\r\nConnection: close\r\n\r\n" % get_str
+		payload = struct.pack(str(len(payload)) + 's', payload)
+	else:
+		for i in range(0, segments[j]):
+			payload += struct.pack('!B', contents)
 
 	# compose TCP option
 	if ts != (0,0):
@@ -1060,7 +1111,7 @@ def tcp_syn_test_x(dhost, dport, mptest=0, peroptpad=0, usepcap=0, plabsrc=0):
     log2file("Info: Transmit Ack for SYNACK\n")
     synack = tcpsrlib.get_synack(ans)
     ack = tcpsrlib.make_segment(daddr, saddr, dport, sport, Awnd, \
-		    synack[1].ackno, synack[1].seqno+1L, tcplib.TH_ACK, \
+	        synack[1].ackno, synack[1].seqno+1L, tcplib.TH_ACK, \
 		    ipcksum=usepcap)
     printpkts((ack,))
     err = tcpsrlib.send_segments(daddr, (ack,), usepcap=usepcap, ifname=ifname,\
@@ -1078,7 +1129,10 @@ def tcp_syn_test_x(dhost, dport, mptest=0, peroptpad=0, usepcap=0, plabsrc=0):
 # opt=1: Known option (TIMESTAMP)
 # opt=2: Unknown option (MP_DATA)
 # opt=3: Unknown option for SYN, no option for data
-def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0):
+def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0, http=0):
+    result_type = ""
+    if (http == 1):
+    	result_type = "Http"
     result = copy.copy(TestEntries)
     daddr, lhost, saddr = tcpsrlib.gethostpair(dhost)
     if daddr == 0 or saddr == 0:
@@ -1123,19 +1177,19 @@ def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0):
         ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, (mss, ), tuple(ts), tuple(nxtdsn), data=data,\
 			timeout=3.0, usepcap=usepcap, ifname=ifname, \
-			dmac=dmacaddr, smac=smacaddr)
+			dmac=dmacaddr, smac=smacaddr, http=http)
 	if err == -1: 
 	    if plabsrc:
 	        close_dummy_conn(saddr, sport)
 	    return result, err
-	if hdr_request_reply(ans)[0] == None:
+	if hdr_request_reply(ans,http=http,result=result)[0] == None:
     	    nxtseq = get_snd_nxt(ans, nxtseq)
     	    ackseq = get_rcv_nxt(ans, ackseq)
 	    continue
 	if opt == 0 or opt == 3: 
 	    res0 = get_data_result(ans, nxtseq, mss)
 	elif opt == 1: 
-	    res0 = get_data_known_opt_result(ans, tuple(ts), nxtseq, mss)
+	    res0 = get_data_known_opt_result(ans, tuple(ts), nxtseq, mss, http=http)
 	elif opt == 2: 
 	    res0 = get_data_opt_result(ans, nxtdsn[0], nxtseq, mss)
 
@@ -1147,11 +1201,11 @@ def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0):
 	else: 
 	    break
     if opt == 0: 
-	result['Data'] = res0
+	result['Data' + result_type] = res0
     elif opt == 1: 
-	result['DataKnownOpt'] = res0
+	result['DataKnownOpt' + result_type] = res0
     elif opt == 2: 
-	result['DataOpt'] = res0
+	result['DataOpt' + result_type] = res0
 
     if res0 == 1 or res0 == -1:
 	if plabsrc:
@@ -1160,31 +1214,31 @@ def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0):
 
     # obtain additional information 
     if opt == 0: 
-	result['IndAck'] = is_ack_indirect(ans)
-	result['ChangeSeq'] = is_seq_rewritten(ans, nxtseq)
-	result['ChangeAwnd'] = is_awnd_rewritten(ans, Awnd)
-	result['ChangeIncomingSeq'] = is_incoming_seq_rewritten(ans)
+	result['IndAck' + result_type] = is_ack_indirect(ans)
+	result['ChangeSeq' + result_type] = is_seq_rewritten(ans, nxtseq,http=http)
+	result['ChangeAwnd' + result_type] = is_awnd_rewritten(ans, Awnd,http=http)
+	result['ChangeIncomingSeq' + result_type] = is_incoming_seq_rewritten(ans,http=http)
     elif opt == 1:
-        result['IndAck4KnownOpt'] = is_ack_indirect(ans)
-	result['ChangeSeq4KnownOpt'] = is_seq_rewritten(ans, nxtseq)
-	result['ChangeAwnd4KnownOpt'] = is_awnd_rewritten(ans, Awnd)
+	result['IndAck4KnownOpt' + result_type] = is_ack_indirect(ans)
+	result['ChangeSeq4KnownOpt' + result_type] = is_seq_rewritten(ans, nxtseq,http=http)
+	result['ChangeAwnd4KnownOpt' + result_type] = is_awnd_rewritten(ans, Awnd,http=http)
     elif opt == 2:
-	result['IndAck4Opt'] = is_ack_indirect(ans)
-	result['ChangeSeq4Opt'] = is_seq_rewritten(ans, nxtseq)
-	result['ChangeAwnd4Opt'] = is_awnd_rewritten(ans, Awnd)
+	result['IndAck4Opt' + result_type] = is_ack_indirect(ans)
+	result['ChangeSeq4Opt' + result_type] = is_seq_rewritten(ans, nxtseq,http=http)
+	result['ChangeAwnd4Opt' + result_type] = is_awnd_rewritten(ans, Awnd,http=http)
     elif opt == 3:
-	result['ChangeIncomingSeq4Opt'] = is_incoming_seq_rewritten(ans)
+	result['ChangeIncomingSeq4Opt' + result_type] = is_incoming_seq_rewritten(ans,http=http)
 
     if opt == 0:
-        result['Split'] = is_segment_split(ans, mss)
+        result['Split' + result_type] = is_segment_split(ans, mss,http=http)
     elif opt == 1:
-        result['SplitKnownOpt'] = is_segment_split(ans, mss)
-	if result['SplitKnownOpt'] > 0: 
-	    result['SplitKnownOpt'] = how_segment_split_from_ts(ans)
+        result['SplitKnownOpt' + result_type] = is_segment_split(ans, mss,http=http)
+	if result['SplitKnownOpt' + result_type] > 0: 
+	    result['SplitKnownOpt' + result_type] = how_segment_split_from_ts(ans,http=http)
     elif opt == 2:
-        result['SplitOpt'] = is_segment_split(ans, mss)
-	if result['SplitOpt'] > 0: 
-	    result['SplitOpt'] = how_segment_split_from_dataack(ans)
+        result['SplitOpt' + result_type] = is_segment_split(ans, mss,http=http)
+	if result['SplitOpt' + result_type] > 0: 
+	    result['SplitOpt' + result_type] = how_segment_split_from_dataack(ans,http=http)
 
     if tcpsrlib.is_connection_reset(ans):
 	if plabsrc:
@@ -1198,7 +1252,7 @@ def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0):
 		    smac=smacaddr, plabsrc=plabsrc)
     return result, err
 
-def tcp_segment_coalesce_1(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0):
+def tcp_segment_coalesce_1(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0, http=0):
     retval = -1
     daddr, lhost, saddr = tcpsrlib.gethostpair(dhost)
     if daddr == 0 or saddr == 0: 
@@ -1256,17 +1310,17 @@ def tcp_segment_coalesce_1(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0):
     ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, segs, tuple(ts), tuple(nxtdsn), data=data, \
 			fq=fq, timeout=3.0, usepcap=usepcap, ifname=ifname, \
-			dmac=dmacaddr, smac=smacaddr)
+			dmac=dmacaddr, smac=smacaddr, http=http)
     if err == -1: 
 	if plabsrc:
 	    close_dummy_conn(saddr, sport)
         return retval, err
-    retval = are_segments_coalesced(ans, segs[1])
+    retval = are_segments_coalesced(ans, segs[1], http=http)
     if retval > 0:
         if opt == 1: 
-            retval = how_tcpopt_coalesced(ans, 2, 'TIMESTAMP')
+            retval = how_tcpopt_coalesced(ans, 2, 'TIMESTAMP', http=http)
         elif opt == 2:
-            retval = how_tcpopt_coalesced(ans, 2, 'MP_DATA')
+            retval = how_tcpopt_coalesced(ans, 2, 'MP_DATA', http=http)
 
     if tcpsrlib.is_connection_reset(ans):
 	if plabsrc:
@@ -1280,14 +1334,17 @@ def tcp_segment_coalesce_1(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0):
 		    smac=smacaddr, plabsrc=plabsrc)
     return retval, err
 
-def tcp_segment_coalesce_x(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0):
+def tcp_segment_coalesce_x(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0, http=0):
+    result_type = ""
+    if (http == 1):
+    	result_type = "Http"
     result = copy.copy(TestEntries)
     tmp_res = [0, 0, 0] # number of res0 -1, 0 and more
     res0 = -1
     err = 0
 
     for i in range(0, 10):
-        res0, err = tcp_segment_coalesce_1(dhost, dport, opt, fq, usepcap=usepcap, plabsrc=plabsrc)
+        res0, err = tcp_segment_coalesce_1(dhost, dport, opt, fq, usepcap=usepcap, plabsrc=plabsrc, http=http)
 	if err == -1:
 	    return result, err
 	elif err == -2:
@@ -1313,24 +1370,27 @@ def tcp_segment_coalesce_x(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0):
 
     if opt == 0:
         if fq: 
-	    result['CoalesceFq'] = res
+	    result['CoalesceFq' + result_type] = res
 	else: 
-	    result['Coalesce'] = res
+	    result['Coalesce' + result_type] = res
     elif opt == 1:
 	if fq: 
-	    result['CoalesceFqKnownOpt'] = res
+	    result['CoalesceFqKnownOpt' + result_type] = res
 	else: 
-	    result['CoalesceKnownOpt'] = res
+	    result['CoalesceKnownOpt' + result_type] = res
     elif opt == 2:
 	if fq: 
-	    result['CoalesceFqOpt'] = res
+	    result['CoalesceFqOpt' + result_type] = res
 	else: 
-	    result['CoalesceOpt'] = res
+	    result['CoalesceOpt' + result_type] = res
     return result, err
 
 # resize:1 retransmit larger segment with different payload
 # resize:2 retransmit smaller segment with different payload
-def tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=0, plabsrc=0):
+def tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=0, plabsrc=0, http=0):
+    result_type = ""
+    if (http == 1):
+    	result_type = "Http"
     result = copy.copy(TestEntries)
     daddr, lhost, saddr = tcpsrlib.gethostpair(dhost)
     if daddr == 0 or saddr == 0: 
@@ -1369,7 +1429,7 @@ def tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=0, plabsrc=0):
 	ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, segs, data=(None, Request_dupack), \
 			usepcap=usepcap, ifname=ifname, dmac=dmacaddr, \
-			smac=smacaddr)
+			smac=smacaddr,http=http)
 	if err < 0 or tcpsrlib.is_connection_reset(ans):
 	    if err == 0:
 	        log2file("Info: connection has been reset during experiment\n")
@@ -1408,22 +1468,22 @@ def tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=0, plabsrc=0):
         ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, rsegs, data=(Request_hdrdata,), timeout=3.0, 
 			usepcap=usepcap, ifname=ifname, dmac=dmacaddr, \
-			smac=smacaddr)
+			smac=smacaddr,http=http)
         if err < 0: 
 	    if plabsrc:
 	        close_dummy_conn(saddr, sport)
 	    return result, err
-	res0 = get_pseudo_rtx_result(ans, rsegs[0], nxtseq, Request_hdrdata)
+	res0 = get_pseudo_rtx_result(ans, rsegs[0], nxtseq, Request_hdrdata, http=http)
 	if i > 0 and res0 == 5:
 	    if plabsrc:
 	        close_dummy_conn(saddr, sport)
 	    return result, err
 	if resize == 0:
-            result['PseudoRtx'] = res0
+            result['PseudoRtx' + result_type] = res0
 	elif resize == 1:
-            result['PseudoRtxL'] = res0
+            result['PseudoRtxL' + result_type] = res0
 	elif resize == 2:
-            result['PseudoRtxS'] = res0
+            result['PseudoRtxS' + result_type] = res0
 
 	if tcpsrlib.is_connection_reset(ans):
 	    log2file("Info: connection has been reset, cannot retry\n")
@@ -1441,7 +1501,10 @@ def tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=0, plabsrc=0):
 		    smac=smacaddr, plabsrc=plabsrc)
     return result, err
 
-def tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=0, plabsrc=0):
+def tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=0, plabsrc=0, http=0):
+    result_type = ""
+    if (http == 1):
+    	result_type = "Http"
     result = copy.copy(TestEntries)
     daddr, lhost, saddr = tcpsrlib.gethostpair(dhost)
     if daddr == 0 or saddr == 0: 
@@ -1475,7 +1538,7 @@ def tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=0, plabsrc=0):
     while failure_count < 3:
         ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, (fullsiz,), data=data, usepcap=usepcap, \
-			ifname=ifname, dmac=dmacaddr, smac=smacaddr)
+			ifname=ifname, dmac=dmacaddr, smac=smacaddr, http=http)
         if err < 0 or tcpsrlib.is_connection_reset(ans): 
 	    if err == 0:
 	        log2file("Info: connection has been reset during experiment\n")
@@ -1486,7 +1549,7 @@ def tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=0, plabsrc=0):
 	elif len(tcpsrlib.get_acklist(ans)) == 0:
 	    failure_count += 1
 	    continue
-	elif ackhole and hdr_request_reply(ans)[0] == None:
+	elif ackhole and hdr_request_reply(ans,http=http,result=result)[0] == None:
 	    nxtseq = get_snd_nxt(ans, nxtseq)
 	    ackseq = get_rcv_nxt(ans, ackseq)
 	    failure_count += 1
@@ -1512,19 +1575,19 @@ def tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=0, plabsrc=0):
     for i in range(0, 3):
         ans, err = output_segments(daddr, dport, saddr, sport, nxtseq, ackseq, \
 			Awnd, (fullsiz,), timeout=3.0, usepcap=usepcap, \
-			ifname=ifname, dmac=dmacaddr, smac=smacaddr)
+			ifname=ifname, dmac=dmacaddr, smac=smacaddr, http=http)
         if err < 0:
 	    if plabsrc:
 	        close_dummy_conn(saddr, sport)
 	    return result, err
 	if ackhole:
-	    result['AckHole'] = get_ackhole_result(ans, ackseq, fullsiz)
+	    result['AckHole' + result_type] = get_ackhole_result(ans, ackseq, fullsiz)
 	    if result['AckHole'] != 1:
 	        nxtseq = get_snd_nxt(ans, nxtseq)
 	        ackseq = get_rcv_nxt(ans, ackseq)
 	        break
 	else:
-	    result['SeqHole'] = get_seqhole_result(ans, nxtseq, fullsiz, fullsiz)
+	    result['SeqHole' + result_type] = get_seqhole_result(ans, nxtseq, fullsiz, fullsiz)
 	    if result['SeqHole'] != 1:
 	        nxtseq = get_snd_nxt(ans, nxtseq)
 	        ackseq = get_rcv_nxt(ans, ackseq)
@@ -1566,19 +1629,38 @@ def tcp_incoming_seq_sopt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_data_test_x(dhost, dport, opt=3, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+def tcp_incoming_seq_sopt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_data_test_x(dhost, dport, opt=3, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 # Regular full-sized segment test
 def tcp_data_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_data_test_x(dhost, dport, opt=0, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+# Regular full-sized segment test (w/ HTTP)
+def tcp_data_test_http(dhost, dport, usepcap=0, plabsrc=0):
+	result, err = tcp_data_test_x(dhost, dport, opt=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
+	return result, err
+
 # Test for full-sized segment including known option
 def tcp_data_known_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_data_test_x(dhost, dport, opt=1, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
-    
+
+# Test for full-sized segment including known option (w/ HTTP)
+def tcp_data_known_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+	result, err = tcp_data_test_x(dhost, dport, opt=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
+	return result, err
+
 # Test for full-sized segment including unknown option
 def tcp_data_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_data_test_x(dhost, dport, opt=2, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+# Test for full-sized segment including unknown option (w/ HTTP)
+def tcp_data_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_data_test_x(dhost, dport, opt=2, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 # segment coalescing test 
@@ -1586,9 +1668,19 @@ def tcp_seg_coalesce_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=0, fq=0, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+# segment coalescing test (w/ HTTP)
+def tcp_seg_coalesce_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=0, fq=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 # segment coalescing test (with known option)
 def tcp_seg_coalesce_known_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=1, fq=0, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+# segment coalescing test (with known option) (w/ HTTP)
+def tcp_seg_coalesce_known_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=1, fq=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 # segment coalescing test (with unknown option)
@@ -1596,9 +1688,19 @@ def tcp_seg_coalesce_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=2, fq=0, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+# segment coalescing test (with unknown option) (w/ HTTP)
+def tcp_seg_coalesce_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=2, fq=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 # segment coalescing test (force middleboxes queue)
 def tcp_seg_coalesce_fq_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=0, fq=1, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+# segment coalescing test (force middleboxes queue) (w/ HTTP)
+def tcp_seg_coalesce_fq_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=0, fq=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 # segment coalescing test (with option, force middleboxes queue)
@@ -1606,9 +1708,19 @@ def tcp_seg_coalesce_fq_known_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=1, fq=1, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+# segment coalescing test (with option, force middleboxes queue) (w/ HTTP)
+def tcp_seg_coalesce_fq_known_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=1, fq=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 # segment coalescing test (with option, force middleboxes queue)
 def tcp_seg_coalesce_fq_opt_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_segment_coalesce_x(dhost, dport, opt=2, fq=1, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+# segment coalescing test (with option, force middleboxes queue) (w/ HTTP)
+def tcp_seg_coalesce_fq_opt_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_segment_coalesce_x(dhost, dport, opt=2, fq=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 # Test for retransmission with different payload
@@ -1616,12 +1728,25 @@ def tcp_pseudo_rtx_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+# Test for retransmission with different payload (w/ HTTP)
+def tcp_pseudo_rtx_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 def tcp_pseudo_larger_rtx_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=1, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+def tcp_pseudo_larger_rtx_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 def tcp_pseudo_smaller_rtx_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=2, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+def tcp_pseudo_smaller_rtx_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_pseudo_rtx_test_x(dhost, dport, resize=2, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 # Test for hole of sequences
@@ -1629,8 +1754,16 @@ def tcp_seq_hole_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=usepcap, plabsrc=plabsrc)
     return result, err
 
+def tcp_seq_hole_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_seq_hole_test_x(dhost, dport, ackhole=0, usepcap=usepcap, plabsrc=plabsrc, http=1)
+    return result, err
+
 def tcp_ack_hole_test(dhost, dport, usepcap=0, plabsrc=0):
     result, err = tcp_seq_hole_test_x(dhost, dport, ackhole=1, usepcap=usepcap, plabsrc=plabsrc)
+    return result, err
+
+def tcp_ack_hole_test_http(dhost, dport, usepcap=0, plabsrc=0):
+    result, err = tcp_seq_hole_test_x(dhost, dport, ackhole=1, usepcap=usepcap, plabsrc=plabsrc, http=1)
     return result, err
 
 def merge_to_summary(summary, results):
@@ -1856,14 +1989,7 @@ def plabdst_udp_flood_operation(daddr, cmd):
     return 0
 
 
-Alltests = [tcp_syn_test, tcp_syn_opt_test, tcp_syn_opt2_test, \
-	tcp_data_test, tcp_data_known_opt_test, tcp_data_opt_test, \
-	tcp_seg_coalesce_test, tcp_seg_coalesce_fq_test,\
-	tcp_seg_coalesce_known_opt_test, tcp_seg_coalesce_fq_known_opt_test, \
-	tcp_seg_coalesce_opt_test, tcp_seg_coalesce_fq_opt_test, \
-	tcp_pseudo_rtx_test, \
-	tcp_pseudo_larger_rtx_test, tcp_pseudo_smaller_rtx_test, \
-	tcp_seq_hole_test, tcp_ack_hole_test, tcp_incoming_seq_sopt_test]
+Alltests = [tcp_syn_opt_test]
 
 def tcp_mbox_test(dhost, dport, usepcap, plabsrc=0, plabdst=0):
 

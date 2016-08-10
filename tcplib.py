@@ -1,7 +1,10 @@
 # Copyright (C) 2010 WIDE Project.  All rights reserved.
+# Copyright (C) 2016 University of Glasgow. All rights reserved.
 #
 # Yoshifumi Nishida  <nishida@sfc.wide.ad.jp>
 # Michio Honda  <micchie@sfc.wide.ad.jp>
+# Stephen McQuistin <sm@smcquistin.uk>
+#   [August 2016] 
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -55,6 +58,7 @@ TO_TIMESTAMP = 8
 TO_MP_CAPABLE = 30
 TO_MP_DATA = 31
 TO_MP_ACK = 32
+TO_MP_SUBTYPE_DSS = 2
 
 class etherhdr:
     def __init__(self, ether_dhost=0, ether_shost=0, type=0x0800):
@@ -289,25 +293,62 @@ def check_padding(tcpoption):
 #
 # functions mptcp options
 #
-def create_mpcapable(token, isn):
-   hisn = (isn & 0xFFFF000000000000)
-   lisn = (isn & 0x0000FFFFFFFF0000)
-   option = pack('!BBLHL', TO_MP_CAPABLE, 12, token, hisn >> 48, lisn >> 16) 
-   return option
+
+# MP_CAPABLE
+def create_mpcapable(crypto, skey, rkey):
+  if rkey is None:
+    option = pack('!BBBBQ', TO_MP_CAPABLE, 12, 0, crypto, skey)
+  else:
+    option = pack('!BBBBQQ', TO_MP_CAPABLE, 20, 0, crypto, skey, rkey)
+  return option
 
 def unpack_mpcapable(option):
-   (token, hisn, lisn) = unpack('!LHL', option) 
-   isn = (hisn << 48) + (lisn << 16)
-   return token, isn
+  flags = (bin(struct.unpack('!B', option[0])[0])[2:].rjust(8, '0'))
+  skey = struct.unpack('!Q', option[1:9])[0]
+  if len(option) == 3:
+    rkey = struct.unpack('!Q', option[9:])[0]
+  else:
+    rkey = None
+  return flags, skey, rkey
 
-#def create_mpjoin():
+# DSS
+def create_mpdss(fin, dsn_long, dack_long, dack, dsn, ssn, dll):
+  flags = str(int(fin)) + str(int(dsn_long)) + str(int(ssn is not None)) + \
+          str(int(dack_long)) + str(int(dack is not None))
+  length = (14 if ssn is not None else 0) + (4 if dack is not None else 0) + \
+           (4 if dack is not None and dack_long else 0) + (4 if dsn_long else 0)
+  option = pack('!BBBB', TO_MP_CAPABLE, length, TO_MP_SUBTYPE_DSS << 4, int(flags))
+  print dsn, ssn, dll
+  if (dack is not None):
+    option += pack('!Q' if dack_long else '!L', dack)
+  if (ssn is not None):
+    option += pack('!QLH' if dsn_long else '!LLH', dsn, ssn, dll)
+  return option
 
-#def create_mpaddr():
+def unpack_mpdss(option):
+    flags = (bin(struct.unpack('!B', option[0])[0])[2:].rjust(8, '0'))[-5:]
+    current_byte = 1
+    dack = dsn = ssn = dll = None
+    if (flags[4] == '1' and flags[3] == '0'):
+      dack = struct.unpack('!L', option[current_byte])[0]
+      current_byte += 1
+    elif (flags[4] == '1' and flags[3] == '1'):
+      # 8-octet data ACK present
+      dack = struct.unpack('!Q', option[current_byte])[0]
+      current_byte += 1
+    if (flags[2] == '1' and flags[1] == '0'):
+      # DSN, SSN, DLL present, with 4-octet DSN
+      (dsn, ssn, dll) = struct.unpack('!LLH', option[current_byte:])
+    elif (flags[2] == '1' and flags[1] == '1'):
+      # DSN, SSN, DLL present, with 8-octet DSN
+      (dsn, ssn, dll) = struct.unpack('!QLH', option[current_byte:])
+    return flags, dack, dsn, ssn, dll
 
 def create_mpdata(dseqno, len, sseqno):
    hseq = (dseqno & 0xFFFFFFFF00000000) >> 32
    lseq = dseqno & 0x00000000FFFFFFFF
-   option = pack('!BBLLHL', TO_MP_DATA, 16, hseq, lseq, len, sseqno)
+   #option = pack('!BBLLHL', TO_MP_DATA, 16, hseq, lseq, len, sseqno)
+   option = pack('!BBBBLLH', TO_MP_CAPABLE, 14, TO_MP_SUBTYPE_DSS << 4, 4, 12, 15, 50)
    return option
 
 def unpack_mpdata(option):

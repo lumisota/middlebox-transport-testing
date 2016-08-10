@@ -187,64 +187,66 @@ def compose_options(options):
     tcpsoption = ""
     avail_opt_len = 40
     for opt in options:
-	if opt[0] == 'NOP':
-	    if avail_opt_len < 1: 
-		break
-	    nop = tcplib.create_nop()
-	    tcpsoption += nop
-	    avail_opt_len -= 1
-	    continue
+        if opt[0] == 'NOP':
+            if avail_opt_len < 1: 
+                break
+            nop = tcplib.create_nop()
+            tcpsoption += nop
+            avail_opt_len -= 1
+            continue
         if opt[0] == 'MSS':
-	    if avail_opt_len < 4: 
-		break
-	    mssoption = tcplib.create_mss(opt[1])
-	    tcpsoption += mssoption
-	    avail_opt_len -= 4
-	    continue
+            if avail_opt_len < 4: 
+                break
+            mssoption = tcplib.create_mss(opt[1])
+            tcpsoption += mssoption
+            avail_opt_len -= 4
+            continue
         if opt[0] == 'WSCALE':
-	    if avail_opt_len < 3: 
-		break
-	    wsoption = tcplib.create_winscale(opt[1])
-	    tcpsoption += wsoption
-	    avail_opt_len -= 3
-	    continue
-	if opt[0] == 'SACKOK':
-	    if avail_opt_len < 2: 
-		break
-	    sackok_option = tcplib.create_sackok()
-	    tcpsoption += sackok_option
-	    avail_opt_len -= 2
-	    continue
-	if opt[0] == 'TIMESTAMP':
-	    if avail_opt_len < 10: 
-		break
-	    tsoption = tcplib.create_timestamp(opt[1], opt[2])
-	    tcpsoption += tsoption
-	    avail_opt_len -= 10
-	    continue
-	if opt[0] == 'MP_CAPABLE':
-	    if avail_opt_len < 12: 
-		break
-	    mpcap_option = tcplib.create_mpcapable(opt[1], opt[2])
-	    tcpsoption += mpcap_option
-	    avail_opt_len -= 12
-	    continue
-	if opt[0] == 'MP_DATA':
-	    if avail_opt_len < 16: 
-		break
-	    # (Dsn (8 Byte), Dlen (2 Byte), Ssn(4 Byte))
-	    dsn_option = tcplib.create_mpdata(opt[1], opt[2], opt[3]) 
-	    tcpsoption += dsn_option
-	    avail_opt_len -= 16
-	    continue
-	if opt[0] == 'MP_ACK':
-	    if avail_opt_len < 10: 
-		break
-	    dataack_option = tcplib.create_mpack(opt[1])
-	    tcpsoption += dataack_option
-	    avail_opt_len -= 10
-	    continue
-
+            if avail_opt_len < 3: 
+                break
+            wsoption = tcplib.create_winscale(opt[1])
+            tcpsoption += wsoption
+            avail_opt_len -= 3
+            continue
+        if opt[0] == 'SACKOK':
+            if avail_opt_len < 2: 
+                break
+            sackok_option = tcplib.create_sackok()
+            tcpsoption += sackok_option
+            avail_opt_len -= 2
+            continue
+        if opt[0] == 'TIMESTAMP':
+            if avail_opt_len < 10: 
+                break
+            tsoption = tcplib.create_timestamp(opt[1], opt[2])
+            tcpsoption += tsoption
+            avail_opt_len -= 10
+            continue
+        if opt[0] == 'MP_CAPABLE':
+            length = 20 if opt[3] is not None else 12
+            if avail_opt_len < length: 
+                break
+            mpcap_option = tcplib.create_mpcapable(opt[1], opt[2], opt[3])
+            tcpsoption += mpcap_option
+            avail_opt_len -= length
+            continue
+        if opt[0] == 'MP_DSS':
+            length = (14 if opt[6] is not None else 0) + (4 if opt[4] is not None else 0) + \
+                     (4 if opt[4] is not None and opt[3] else 0) + (4 if opt[5] else 0)
+            if avail_opt_len < length: 
+                break
+            dss_option = tcplib.create_mpdss(opt[1], opt[2], opt[3], opt[4], \
+                                              opt[5], opt[6], opt[7]) 
+            tcpsoption += dss_option
+            avail_opt_len -= length
+            continue
+        if opt[0] == 'MP_ACK':
+            if avail_opt_len < 10: 
+                break
+            dataack_option = tcplib.create_mpack(opt[1])
+            tcpsoption += dataack_option
+            avail_opt_len -= 10
+            continue
     tcpsoption += tcplib.check_padding(tcpsoption)
     return tcpsoption
 
@@ -252,52 +254,61 @@ def decompose_options(ofield):
     tcpoptions = []
     olen = len(ofield)
     if olen == 0: 
-	return tcpoptions
+        return tcpoptions
+
     # Sequentially parse each option 
     idx = 0
     while olen > 0:
         if len(ofield[idx:idx+1]) == 0:
-	    break
-	kind = struct.unpack('b', ofield[idx:idx+1])[0]
-	if kind == 0:
-	   tcpoptions.append(['EOL',''])
-	elif kind == 1:
-	   tcpoptions.append(['NOP',''])
-	if kind == 0 or kind == 1:
-	    idx += 1
-	    olen -= 1
-	    continue
-	optlen = struct.unpack('b', ofield[idx+1: idx+2])[0]
+            break
 
-	if kind == tcplib.TO_MSS and olen >= 4:
-	   mss = tcplib.unpack_mss(ofield[idx+2: idx+4])
-	   tcpoptions.append(['MSS', mss])
+        kind = struct.unpack('b', ofield[idx:idx+1])[0]
+        if kind == 0:
+            tcpoptions.append(['EOL',''])
+        elif kind == 1:
+            tcpoptions.append(['NOP',''])
 
-	elif kind == tcplib.TO_WSCALE and olen >= 3:
-	   wscale = tcplib.unpack_winscale(ofield[idx+2: idx+3])
-	   tcpoptions.append(['WSCALE', wscale])
+        if kind == 0 or kind == 1:
+            idx += 1
+            olen -= 1
+            continue
 
-	elif kind == tcplib.TO_SACKOK and olen >= 2:
-	   tcpoptions.append(['SACKOK', ''])
+        optlen = struct.unpack('!B', ofield[idx+1: idx+2])[0]
 
-	elif kind == tcplib.TO_TIMESTAMP and olen >= 10:
-	   tsval, tsecr = tcplib.unpack_timestamp(ofield[idx+2: idx+10])
-	   tcpoptions.append(['TIMESTAMP', tsval, tsecr])
+        if kind == tcplib.TO_MSS and olen >= 4:
+            mss = tcplib.unpack_mss(ofield[idx+2: idx+4])
+            tcpoptions.append(['MSS', mss])
 
-	elif kind == tcplib.TO_MP_CAPABLE and olen >= 12:
-	   token, idsn = tcplib.unpack_mpcapable(ofield[idx+2: idx+12])
-	   tcpoptions.append(['MP_CAPABLE', token, idsn])
+        elif kind == tcplib.TO_WSCALE and olen >= 3:
+            wscale = tcplib.unpack_winscale(ofield[idx+2: idx+3])
+            tcpoptions.append(['WSCALE', wscale])
 
-	elif kind == tcplib.TO_MP_DATA and olen >= 16:
-	   dseq, dlen, sseq = tcplib.unpack_mpdata(ofield[idx+2: idx+16])
-	   tcpoptions.append(['MP_DATA', dseq, dlen, sseq])
+        elif kind == tcplib.TO_SACKOK and olen >= 2:
+            tcpoptions.append(['SACKOK', ''])
 
-	elif kind == tcplib.TO_MP_ACK and olen >= 10:
-	   dack = tcplib.unpack_mpack(ofield[idx+2: idx+10])
-	   tcpoptions.append(['MP_ACK', dack])
+        elif kind == tcplib.TO_TIMESTAMP and olen >= 10:
+            tsval, tsecr = tcplib.unpack_timestamp(ofield[idx+2: idx+10])
+            tcpoptions.append(['TIMESTAMP', tsval, tsecr])
 
-	idx += optlen
-	olen -= optlen
+        elif kind == tcplib.TO_MP_CAPABLE:
+            subtype = (struct.unpack('!B', ofield[idx+2])[0] % 0x100000000) >> 4
+            if subtype == tcplib.TO_MP_SUBTYPE_DSS:
+                (flags, dack, dsn, ssn, dll) = tcplib.unpack_mpdss(ofield[idx+3: idx+optlen])
+                tcpoptions.append(['DSS', flags, dack, dsn, ssn, dll])
+            elif subtype == 0:
+                (flags, skey, rkey) = tcplib.unpack_mpcapable(ofield[idx+3: idx+optlen])
+                tcpoptions.append(['MP_CAPABLE', flags, skey, rkey])
+            #tcpoptions.append(['MP_CAPABLE', token, idsn])
+        elif kind == tcplib.TO_MP_DATA and olen >= 16:
+            dseq, dlen, sseq = tcplib.unpack_mpdata(ofield[idx+2: idx+16])
+            tcpoptions.append(['MP_DATA', dseq, dlen, sseq])
+
+        elif kind == tcplib.TO_MP_ACK and olen >= 10:
+            dack = tcplib.unpack_mpack(ofield[idx+2: idx+10])
+            tcpoptions.append(['MP_ACK', dack])
+
+        idx += optlen
+        olen -= optlen
 
     return tcpoptions
 

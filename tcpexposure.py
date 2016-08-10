@@ -225,7 +225,7 @@ def get_mprcv_nxt(ans, mpackseq):
     tmp_dlen = 0
     for rcv in ans:
 	for opt in rcv[2]:
-	   if opt[0] != 'MP_DATA': continue
+	   if opt[0] != 'MP_DSS': continue
 	   if opt[1] > highest_dsn:
 	       highest_dsn = opt[1]
 	       tmp_dlen = opt[2]
@@ -385,7 +385,7 @@ def is_mpdata_removed(ans, http=0):
     if rcvdhdr is None: 
 	return -1
     for opt in rcvdhdr[2]:
-        if opt[0] != 'MP_DATA': continue
+        if opt[0] != 'MP_DSS': continue
 	return 0
     return 1
 
@@ -395,7 +395,7 @@ def is_mpdata_zeroed(ans, http=0):
     if rcvdhdr is None: 
 	return -1
     for opt in rcvdhdr[2]:
-        if opt[0] != 'MP_DATA': continue
+        if opt[0] != 'MP_DSS': continue
 	if opt[1] == 0x0000000000000000: 
 	    return 1
 	else: 
@@ -409,7 +409,7 @@ def is_mpdata_changed(ans, sentdsn, http=0):
 	return -1
     found = 0
     for opt in rcvdhdr[2]:
-        if opt[0] != 'MP_DATA': continue
+        if opt[0] != 'MP_DSS': continue
 	if opt[1] == sentdsn: 
 	    return 0
         else: 
@@ -656,7 +656,7 @@ def how_tcpopt_coalesced(ans, num_segs, optname, http=0):
 	    continue
 	num_opt_rhdr += 1
     num_opt_acks = 0
-    if optname == 'MP_DATA':
+    if optname == 'MP_DSS':
         opt_acks = tcpsrlib.get_dataacklist(ans)
 	nondup = []
 	for i in opt_acks:
@@ -925,7 +925,7 @@ def output_segments(daddr, dport, saddr, sport, startseq, ackseq, awnd, \
 	    soption.append(['NOP', ''])
 	    soption.append(['NOP', ''])
 	if dsnon: 
-	    soption.append(['MP_DATA', nxtdsn[0], len(payload), nxtdsn[1]])
+	    soption.append(['MP_DSS', False, False, False, None, 1500, nxtdsn[1], len(payload)])
 
 	# compose TCP segment
 	pkt = tcpsrlib.make_segment(daddr, saddr, dport, sport, awnd, \
@@ -1039,11 +1039,11 @@ def tcp_syn_test_x(dhost, dport, mptest=0, peroptpad=0, usepcap=0, plabsrc=0):
         soptions = [('MSS', Mss), ('TIMESTAMP', Ts_vals[0], Ts_vals[1]), \
 		   ('NOP',''), ('NOP',''), ('SACKOK',''), ('NOP',''), \
 		   ('NOP',''), ('WSCALE', Winscale), ('NOP',''),\
-		   ('MP_CAPABLE', Mptcp_token, Mptcp_idsn)]
+		   ('MP_CAPABLE', 13, Mptcp_token, None)]
     elif mptest:
         soptions = [('MSS', Mss), ('TIMESTAMP',Ts_vals[0], Ts_vals[1]),\
 		   ('SACKOK',''), ('WSCALE', Winscale), ('NOP',''), \
-		   ('MP_CAPABLE', Mptcp_token, Mptcp_idsn)]
+		   ('MP_CAPABLE', 13, Mptcp_token, None)]
     else:
         soptions = [('MSS', Mss), ('TIMESTAMP',Ts_vals[0], Ts_vals[1]), \
 		   ('SACKOK',''), ('WSCALE', Winscale), ('NOP','')] 
@@ -1149,7 +1149,7 @@ def tcp_data_test_x(dhost, dport, opt=0, usepcap=0, plabsrc=0, http=0):
     if opt == 3:
         synopt = (('MSS', 512), ('TIMESTAMP', Ts_vals[0], Ts_vals[1]),\
 		('SACKOK',''), ('WSCALE', Winscale), ('NOP',''), \
-		('MP_CAPABLE', Mptcp_token, Mptcp_idsn))
+		('MP_CAPABLE', 13, Mptcp_token, None))
     else:
         synopt = (('MSS', 512),)
     synack, err = tcp_syn_connect(daddr, dport, saddr, sport, Isn, Awnd, \
@@ -1320,7 +1320,7 @@ def tcp_segment_coalesce_1(dhost, dport, opt=0, fq=0, usepcap=0, plabsrc=0, http
         if opt == 1: 
             retval = how_tcpopt_coalesced(ans, 2, 'TIMESTAMP', http=http)
         elif opt == 2:
-            retval = how_tcpopt_coalesced(ans, 2, 'MP_DATA', http=http)
+            retval = how_tcpopt_coalesced(ans, 2, 'MP_DSS', http=http)
 
     if tcpsrlib.is_connection_reset(ans):
 	if plabsrc:
@@ -1989,7 +1989,7 @@ def plabdst_udp_flood_operation(daddr, cmd):
     return 0
 
 
-Alltests = [tcp_syn_opt_test]
+Alltests = [tcp_data_opt_test]
 
 def tcp_mbox_test(dhost, dport, usepcap, plabsrc=0, plabdst=0):
 

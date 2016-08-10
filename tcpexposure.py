@@ -1989,7 +1989,7 @@ def plabdst_udp_flood_operation(daddr, cmd):
     return 0
 
 
-Alltests = [tcp_data_opt_test]
+Alltests = [tcp_syn_test]
 
 def tcp_mbox_test(dhost, dport, usepcap, plabsrc=0, plabdst=0):
 
